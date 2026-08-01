@@ -2,15 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPricing, isPersistenceConfigured, savePricing } from "@/lib/pricing-store";
 import { scrapeCambio } from "@/lib/scrape-cambio";
 import { scrapeDegage } from "@/lib/scrape-degage";
+import { KmBracket } from "@/lib/types";
+
+function isBracket(b: KmBracket | null): b is KmBracket {
+  return b !== null;
+}
 
 /**
  * Intended to be hit periodically by Vercel Cron (see vercel.json).
  *
- * Dégage's pricing is just two numbers (per-km rate for category A and B),
- * so when the scrape is confident it is auto-applied. Cambio's pricing is a
- * package x category matrix which a text scan can't safely reconstruct
- * unattended, so cron only records that a check happened and leaves the
- * `needsReview` flag for a human to reconcile via /admin.
+ * Dégage's pricing is a small, fixed-shape km-bracket table per category, so
+ * when the scrape confidently finds all three brackets for both categories
+ * it's auto-applied. Cambio's pricing is a much larger package x category x
+ * time-band x km-bracket matrix (some of it behind expandable sections),
+ * which a text scan can't safely reconstruct unattended, so cron only
+ * records that a check happened and leaves `needsReview` for a human to
+ * reconcile via /admin.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -27,23 +34,27 @@ export async function GET(req: NextRequest) {
 
   try {
     const degageScrape = await scrapeDegage();
-    summary.degage = { confidence: degageScrape.confidence, notes: degageScrape.notes };
+    summary.degage = {
+      confidenceA: degageScrape.categoryA.confidence,
+      confidenceB: degageScrape.categoryB.confidence,
+      notes: degageScrape.notes,
+    };
 
-    if (
-      degageScrape.confidence === "high" &&
-      degageScrape.suggestedCategoryA !== null &&
-      degageScrape.suggestedCategoryB !== null &&
-      isPersistenceConfigured()
-    ) {
+    const bracketsA = degageScrape.categoryA.brackets;
+    const bracketsB = degageScrape.categoryB.brackets;
+    const aComplete = bracketsA.every((b) => b !== null);
+    const bComplete = bracketsB.every((b) => b !== null);
+
+    if (aComplete && bComplete && isPersistenceConfigured()) {
       current.degage = {
         ...current.degage,
         asOf: now.slice(0, 10),
         needsReview: false,
         categories: current.degage.categories.map((c) =>
           c.categoryId === "A"
-            ? { ...c, pricePerKm: degageScrape.suggestedCategoryA! }
+            ? { ...c, kmBrackets: bracketsA.filter(isBracket) }
             : c.categoryId === "B"
-              ? { ...c, pricePerKm: degageScrape.suggestedCategoryB! }
+              ? { ...c, kmBrackets: bracketsB.filter(isBracket) }
               : c
         ),
       };

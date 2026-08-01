@@ -5,13 +5,28 @@ carsharing trip prices between **Cambio** and **Dégage**.
 
 - Pick Cambio, Dégage, or both.
 - **Cambio**: choose a package (Start / Bonus / Comfort), car category,
-  start/end date & time, and distance. The price is time-based (hourly rate,
-  capped by a day rate) plus a per-km rate, both of which depend on the
-  package and car category.
+  start/end date & time, and distance.
+  - Hourly rate depends on time of day: a day rate (06:00-24:00) and a
+    cheaper night rate (00:00-06:00), split per calendar day the trip
+    touches.
+  - Each calendar day's time cost is capped at that category's day rate; a
+    run of 7 consecutive calendar days can instead be billed at a flat
+    weekly rate when that's cheaper.
+  - The per-km rate drops after the first 100 km.
 - **Dégage**: choose category A or B and a distance. Dégage only charges
-  per km (fuel included) — no hourly or subscription fee.
+  per km (fuel included, no hourly/subscription fee), tiered: one rate for
+  the first 100 km, a lower rate for 100-200 km, and a lower rate again
+  beyond 200 km.
 - **Both**: fills in all of the above and shows the two totals side by side,
   highlighting the cheaper option.
+
+The full pricing model lives in `lib/calc.ts` (`calculateCambio` /
+`calculateDegage`) and `lib/types.ts`. Cambio's day/day-cap/week-cap
+interaction is an interpretation of the publicly described structure (no
+official rulebook was available while building this) — the "day-by-day,
+capped, with the cheaper of daily-caps-summed vs. a weekly-cap" logic is
+documented inline in `calc.ts` and should be checked against cambio.be's
+actual terms if the exact cap precedence matters for your use case.
 
 ## Pricing data & the update mechanism
 
@@ -25,14 +40,17 @@ refreshed without a redeploy.
 1. **Fetch latest** — calls `POST /api/pricing/update`, which fetches
    `cambio.be` and `degage.be` live and runs a best-effort text scan
    (`lib/scrape-cambio.ts`, `lib/scrape-degage.ts`) for euro amounts near
-   package/category names. It reports a confidence level and shows the raw
+   package/category names and Dégage's `0-100 km` / `100-200 km` / `vanaf
+   201 km` bracket labels. It reports a confidence level and shows the raw
    matches — this is a starting point for a human to check, not a
-   guaranteed structured parse of either page.
+   guaranteed structured parse of either page. Cambio's page also has some
+   tiers inside expandable sections that may only load via JavaScript,
+   which a plain HTML fetch can miss.
 2. **Review & edit** — every rate is editable inline. Dégage's high-confidence
-   suggestions can be applied with one click since it's just two numbers
-   (category A / B, €/km). Cambio's package × category matrix always needs a
-   human glance since a text scan can't safely reconstruct a whole pricing
-   table unattended.
+   suggestions (all 3 km brackets found for a category) can be applied with
+   one click. Cambio's larger package × category × time-band × km-bracket
+   matrix always needs a human glance since a text scan can't safely
+   reconstruct a whole pricing table unattended.
 3. **Save** — persists to Vercel KV / Upstash Redis if configured (see
    below). Without persistence, Save shows the JSON to paste into
    `lib/pricing-seed.ts` before redeploying.

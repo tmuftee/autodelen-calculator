@@ -5,9 +5,13 @@ export interface CambioScrapeResult {
   fetchedAt: string;
   packagesDetected: string[];
   categoriesDetected: string[];
+  dayNightMentioned: boolean;
+  km100BracketMentioned: boolean;
+  weeklyRateMentioned: boolean;
   hourlyAmounts: AmountMention[];
   kmAmounts: AmountMention[];
   dayAmounts: AmountMention[];
+  weekAmounts: AmountMention[];
   monthlyAmounts: AmountMention[];
   packageExcerpts: Record<string, string[]>;
   confidence: "low" | "medium" | "high";
@@ -30,11 +34,18 @@ export async function scrapeCambio(
     new RegExp(`\\b${cat}\\b`).test(text)
   );
 
+  const dayNightMentioned = /\b(dag\s*\/?\s*nacht|day\s*\/?\s*night|06:00|6\s?u\b|00:00)/i.test(text);
+  const km100BracketMentioned = /100\s*km/i.test(text);
+  const weeklyRateMentioned = /\b(weektarief|weekprijs|weekly\s*rate|per\s*week|\/week)\b/i.test(text);
+
   const mentions = extractAmountMentions(text);
   const hourlyAmounts = mentions.filter((m) => m.unit === "hour");
   const kmAmounts = mentions.filter((m) => m.unit === "km");
   const dayAmounts = mentions.filter((m) => m.unit === "day");
   const monthlyAmounts = mentions.filter((m) => m.unit === "month");
+  const weekAmounts = extractAmountMentions(text, 40).filter((m) =>
+    /(per\s*week|\/week|weektarief|weekprijs)/i.test(m.context)
+  );
 
   const packageExcerpts: Record<string, string[]> = {};
   for (const pkg of packagesDetected) {
@@ -60,8 +71,17 @@ export async function scrapeCambio(
   if (hourlyAmounts.length === 0 || kmAmounts.length === 0) {
     notes.push("Could not find clearly-labelled per-hour and per-km amounts.");
   }
+  if (!dayNightMentioned) {
+    notes.push("Could not confirm day/night rate split (06:00-24:00 vs 00:00-06:00) from the text.");
+  }
+  if (!km100BracketMentioned) {
+    notes.push("Could not confirm the 100 km price-break point.");
+  }
+  if (!weeklyRateMentioned) {
+    notes.push("Could not find a weekly-rate mention.");
+  }
   notes.push(
-    "This is a best-effort text scan, not a structured table parse - always verify against the source before saving."
+    "Cambio's pricing tables include several tiers (day/night hourly, km brackets, day cap, weekly rate) and some are inside expandable sections that may only load via JavaScript - this is a plain-text scan of the fetched HTML, so it can miss content that isn't in the initial page load. Always verify each number against the live page before saving."
   );
 
   return {
@@ -69,9 +89,13 @@ export async function scrapeCambio(
     fetchedAt: new Date().toISOString(),
     packagesDetected,
     categoriesDetected,
+    dayNightMentioned,
+    km100BracketMentioned,
+    weeklyRateMentioned,
     hourlyAmounts,
     kmAmounts,
     dayAmounts,
+    weekAmounts,
     monthlyAmounts,
     packageExcerpts,
     confidence,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatEUR } from "@/lib/format";
-import { PricingData } from "@/lib/types";
+import { KmBracket, PricingData } from "@/lib/types";
 
 interface AmountMention {
   amount: number;
@@ -15,25 +15,34 @@ interface CambioScrape {
   fetchedAt: string;
   packagesDetected: string[];
   categoriesDetected: string[];
+  dayNightMentioned: boolean;
+  km100BracketMentioned: boolean;
+  weeklyRateMentioned: boolean;
   hourlyAmounts: AmountMention[];
   kmAmounts: AmountMention[];
   dayAmounts: AmountMention[];
+  weekAmounts: AmountMention[];
   confidence: string;
   notes: string[];
   error?: string;
 }
 
+interface DegageCategoryScrape {
+  brackets: (KmBracket | null)[];
+  excerpt: string | null;
+  confidence: string;
+}
+
 interface DegageScrape {
   sourceUrl: string;
   fetchedAt: string;
-  suggestedCategoryA: number | null;
-  suggestedCategoryB: number | null;
-  categoryAExcerpts: string[];
-  categoryBExcerpts: string[];
-  confidence: string;
+  categoryA: DegageCategoryScrape;
+  categoryB: DegageCategoryScrape;
   notes: string[];
   error?: string;
 }
+
+const BRACKET_LABELS = ["0-100 km", "100-200 km", "200+ km"];
 
 export default function AdminClient() {
   const [pricing, setPricing] = useState<PricingData | null>(null);
@@ -105,7 +114,12 @@ export default function AdminClient() {
     }
   }
 
-  function updateCambio(packageId: string, categoryId: string, field: "hourlyRate" | "dayRate" | "kmRate", value: number) {
+  function updateCambioField(
+    packageId: string,
+    categoryId: string,
+    field: "dayHourlyRate" | "nightHourlyRate" | "dayRate" | "weeklyRate",
+    value: number
+  ) {
     if (!editing) return;
     setEditing({
       ...editing,
@@ -114,6 +128,31 @@ export default function AdminClient() {
         packages: editing.cambio.packages.map((p) =>
           p.id === packageId
             ? { ...p, rates: p.rates.map((r) => (r.categoryId === categoryId ? { ...r, [field]: value } : r)) }
+            : p
+        ),
+      },
+    });
+  }
+
+  function updateCambioKmBracket(packageId: string, categoryId: string, bracketIndex: number, value: number) {
+    if (!editing) return;
+    setEditing({
+      ...editing,
+      cambio: {
+        ...editing.cambio,
+        packages: editing.cambio.packages.map((p) =>
+          p.id === packageId
+            ? {
+                ...p,
+                rates: p.rates.map((r) =>
+                  r.categoryId === categoryId
+                    ? {
+                        ...r,
+                        kmBrackets: r.kmBrackets.map((b, i) => (i === bracketIndex ? { ...b, pricePerKm: value } : b)),
+                      }
+                    : r
+                ),
+              }
             : p
         ),
       },
@@ -131,13 +170,31 @@ export default function AdminClient() {
     });
   }
 
-  function updateDegage(categoryId: "A" | "B", value: number) {
+  function updateDegageKmBracket(categoryId: "A" | "B", bracketIndex: number, value: number) {
     if (!editing) return;
     setEditing({
       ...editing,
       degage: {
         ...editing.degage,
-        categories: editing.degage.categories.map((c) => (c.categoryId === categoryId ? { ...c, pricePerKm: value } : c)),
+        categories: editing.degage.categories.map((c) =>
+          c.categoryId === categoryId
+            ? { ...c, kmBrackets: c.kmBrackets.map((b, i) => (i === bracketIndex ? { ...b, pricePerKm: value } : b)) }
+            : c
+        ),
+      },
+    });
+  }
+
+  function applyDegageBrackets(categoryId: "A" | "B", brackets: (KmBracket | null)[]) {
+    if (!editing) return;
+    if (brackets.some((b) => b === null)) return;
+    setEditing({
+      ...editing,
+      degage: {
+        ...editing.degage,
+        categories: editing.degage.categories.map((c) =>
+          c.categoryId === categoryId ? { ...c, kmBrackets: brackets as KmBracket[] } : c
+        ),
       },
     });
   }
@@ -191,8 +248,12 @@ export default function AdminClient() {
                 <div className="flex flex-col gap-1 text-xs text-neutral-600 dark:text-neutral-400">
                   <p>Packages detected: {scrape.cambio.packagesDetected.join(", ") || "none"}</p>
                   <p>Categories detected: {scrape.cambio.categoriesDetected.join(", ") || "none"}</p>
+                  <p>Day/night rate split mentioned: {scrape.cambio.dayNightMentioned ? "yes" : "no"}</p>
+                  <p>100 km price-break mentioned: {scrape.cambio.km100BracketMentioned ? "yes" : "no"}</p>
+                  <p>Weekly rate mentioned: {scrape.cambio.weeklyRateMentioned ? "yes" : "no"}</p>
                   <p>Hourly amounts seen: {scrape.cambio.hourlyAmounts.map((a) => a.amount).join(", ") || "none"}</p>
-                  <p>Day amounts seen: {scrape.cambio.dayAmounts.map((a) => a.amount).join(", ") || "none"}</p>
+                  <p>Day-cap amounts seen: {scrape.cambio.dayAmounts.map((a) => a.amount).join(", ") || "none"}</p>
+                  <p>Week amounts seen: {scrape.cambio.weekAmounts.map((a) => a.amount).join(", ") || "none"}</p>
                   <p>Km amounts seen: {scrape.cambio.kmAmounts.map((a) => a.amount).join(", ") || "none"}</p>
                 </div>
               )}
@@ -201,34 +262,46 @@ export default function AdminClient() {
             <ScrapePanel
               title="Dégage"
               sourceUrl={scrape.degage.sourceUrl}
-              confidence={scrape.degage.error ? undefined : scrape.degage.confidence}
               error={scrape.degage.error}
               notes={scrape.degage.notes}
             >
               {!scrape.degage.error && (
-                <div className="flex flex-col gap-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  <p>
-                    Suggested category A: {scrape.degage.suggestedCategoryA !== null ? formatEUR(scrape.degage.suggestedCategoryA) : "—"}
-                    {isEditing && scrape.degage.suggestedCategoryA !== null && (
-                      <button
-                        className="ml-2 underline underline-offset-2"
-                        onClick={() => updateDegage("A", scrape.degage.suggestedCategoryA!)}
-                      >
-                        apply
-                      </button>
-                    )}
-                  </p>
-                  <p>
-                    Suggested category B: {scrape.degage.suggestedCategoryB !== null ? formatEUR(scrape.degage.suggestedCategoryB) : "—"}
-                    {isEditing && scrape.degage.suggestedCategoryB !== null && (
-                      <button
-                        className="ml-2 underline underline-offset-2"
-                        onClick={() => updateDegage("B", scrape.degage.suggestedCategoryB!)}
-                      >
-                        apply
-                      </button>
-                    )}
-                  </p>
+                <div className="flex flex-col gap-3 text-xs text-neutral-600 dark:text-neutral-400">
+                  {(["A", "B"] as const).map((cat) => {
+                    const catScrape = cat === "A" ? scrape.degage.categoryA : scrape.degage.categoryB;
+                    const complete = catScrape.brackets.every((b) => b !== null);
+                    return (
+                      <div key={cat}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">Category {cat}</span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              catScrape.confidence === "high"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                : catScrape.confidence === "medium"
+                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                                  : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                            }`}
+                          >
+                            {catScrape.confidence} confidence
+                          </span>
+                          {isEditing && complete && (
+                            <button
+                              className="underline underline-offset-2"
+                              onClick={() => applyDegageBrackets(cat, catScrape.brackets)}
+                            >
+                              apply all
+                            </button>
+                          )}
+                        </div>
+                        <p>
+                          {BRACKET_LABELS.map(
+                            (label, i) => `${label}: ${catScrape.brackets[i] ? formatEUR(catScrape.brackets[i]!.pricePerKm) : "—"}`
+                          ).join(" · ")}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </ScrapePanel>
@@ -275,7 +348,9 @@ export default function AdminClient() {
         )}
 
         <p className="text-xs text-neutral-500">
-          Source: <a className="underline underline-offset-2" href={draft.cambio.source}>{draft.cambio.source}</a>
+          Source: <a className="underline underline-offset-2" href={draft.cambio.source}>{draft.cambio.source}</a> — hourly
+          rate depends on time of day (06:00-24:00 vs 00:00-06:00), the day rate is a cap on a single calendar day, the
+          weekly rate is a cap for a full 7-day block, and the km rate drops after 100&nbsp;km.
         </p>
         {draft.cambio.packages.map((pkg) => (
           <div key={pkg.id} className="overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
@@ -299,16 +374,21 @@ export default function AdminClient() {
               <thead>
                 <tr className="text-left text-xs text-neutral-500">
                   <th className="px-4 py-2 font-normal">Category</th>
-                  <th className="px-4 py-2 font-normal">€/hour</th>
-                  <th className="px-4 py-2 font-normal">€/day (cap)</th>
-                  <th className="px-4 py-2 font-normal">€/km</th>
+                  <th className="px-4 py-2 font-normal">€/h day</th>
+                  <th className="px-4 py-2 font-normal">€/h night</th>
+                  <th className="px-4 py-2 font-normal">€/day cap</th>
+                  <th className="px-4 py-2 font-normal">€/week cap</th>
+                  <th className="px-4 py-2 font-normal">€/km ≤100</th>
+                  <th className="px-4 py-2 font-normal">€/km 100+</th>
                 </tr>
               </thead>
               <tbody>
                 {pkg.rates.map((rate) => (
                   <tr key={rate.categoryId} className="border-t border-neutral-100 dark:border-neutral-800">
-                    <td className="px-4 py-2">{draft.cambio.categories.find((c) => c.id === rate.categoryId)?.name ?? rate.categoryId}</td>
-                    {(["hourlyRate", "dayRate", "kmRate"] as const).map((field) => (
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {draft.cambio.categories.find((c) => c.id === rate.categoryId)?.name ?? rate.categoryId}
+                    </td>
+                    {(["dayHourlyRate", "nightHourlyRate", "dayRate", "weeklyRate"] as const).map((field) => (
                       <td key={field} className="px-4 py-2">
                         {isEditing ? (
                           <input
@@ -316,10 +396,25 @@ export default function AdminClient() {
                             step="0.01"
                             className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
                             value={rate[field]}
-                            onChange={(e) => updateCambio(pkg.id, rate.categoryId, field, Number(e.target.value))}
+                            onChange={(e) => updateCambioField(pkg.id, rate.categoryId, field, Number(e.target.value))}
                           />
                         ) : (
                           formatEUR(rate[field])
+                        )}
+                      </td>
+                    ))}
+                    {rate.kmBrackets.map((bracket, i) => (
+                      <td key={i} className="px-4 py-2">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                            value={bracket.pricePerKm}
+                            onChange={(e) => updateCambioKmBracket(pkg.id, rate.categoryId, i, Number(e.target.value))}
+                          />
+                        ) : (
+                          formatEUR(bracket.pricePerKm)
                         )}
                       </td>
                     ))}
@@ -331,33 +426,40 @@ export default function AdminClient() {
         ))}
 
         <p className="mt-2 text-xs text-neutral-500">
-          Source: <a className="underline underline-offset-2" href={draft.degage.source}>{draft.degage.source}</a>
+          Source: <a className="underline underline-offset-2" href={draft.degage.source}>{draft.degage.source}</a> — km
+          rate drops at 100&nbsp;km and again at 200&nbsp;km.
         </p>
         <div className="overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-neutral-500">
                 <th className="px-4 py-2 font-normal">Category</th>
-                <th className="px-4 py-2 font-normal">€/km</th>
+                {BRACKET_LABELS.map((label) => (
+                  <th key={label} className="px-4 py-2 font-normal">
+                    €/km {label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {draft.degage.categories.map((c) => (
                 <tr key={c.categoryId} className="border-t border-neutral-100 dark:border-neutral-800">
                   <td className="px-4 py-2">{c.name}</td>
-                  <td className="px-4 py-2">
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
-                        value={c.pricePerKm}
-                        onChange={(e) => updateDegage(c.categoryId, Number(e.target.value))}
-                      />
-                    ) : (
-                      formatEUR(c.pricePerKm)
-                    )}
-                  </td>
+                  {c.kmBrackets.map((bracket, i) => (
+                    <td key={i} className="px-4 py-2">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                          value={bracket.pricePerKm}
+                          onChange={(e) => updateDegageKmBracket(c.categoryId, i, Number(e.target.value))}
+                        />
+                      ) : (
+                        formatEUR(bracket.pricePerKm)
+                      )}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>

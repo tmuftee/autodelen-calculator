@@ -1,27 +1,52 @@
-import { extractAmountMentions, fetchVisibleText, findNearby } from "./scrape-common";
+import { fetchVisibleText, findNearby } from "./scrape-common";
+import { KmBracket } from "./types";
+
+export interface DegageCategoryScrape {
+  brackets: (KmBracket | null)[]; // same order as BRACKET_LABELS; null = not found
+  excerpt: string | null;
+  confidence: "low" | "medium" | "high";
+}
 
 export interface DegageScrapeResult {
   sourceUrl: string;
   fetchedAt: string;
-  categoryAAmounts: number[];
-  categoryBAmounts: number[];
-  categoryAExcerpts: string[];
-  categoryBExcerpts: string[];
-  allKmAmounts: number[];
-  confidence: "low" | "medium" | "high";
-  suggestedCategoryA: number | null;
-  suggestedCategoryB: number | null;
+  categoryA: DegageCategoryScrape;
+  categoryB: DegageCategoryScrape;
   notes: string[];
 }
 
-function bestGuess(amounts: number[]): number | null {
-  if (amounts.length === 0) return null;
-  // Plausible per-km carsharing price range; filters out unrelated euro amounts.
-  const plausible = amounts.filter((a) => a >= 0.1 && a <= 2.5);
-  const pool = plausible.length > 0 ? plausible : amounts;
-  const counts = new Map<number, number>();
-  for (const a of pool) counts.set(a, (counts.get(a) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+// Known table shape from degage.be/de-prijzen: "0-100 km", "100-200 km", "vanaf 201 km".
+const BRACKET_LABELS: { pattern: RegExp; uptoKm: number | null }[] = [
+  { pattern: /0\s*-\s*100\s*km/i, uptoKm: 100 },
+  { pattern: /100\s*-\s*200\s*km/i, uptoKm: 200 },
+  { pattern: /vanaf\s*20?1?\s*km|from\s*20?1?\s*km|>\s*200\s*km|200\s*\+\s*km/i, uptoKm: null },
+];
+
+const AMOUNT_AFTER_LABEL = /€\s?(\d{1,3}(?:[.,]\d{1,2})?)/;
+
+function findAmountAfter(text: string, fromIndex: number, windowChars = 60): number | null {
+  const slice = text.slice(fromIndex, fromIndex + windowChars);
+  const match = AMOUNT_AFTER_LABEL.exec(slice);
+  if (!match) return null;
+  const value = parseFloat(match[1].replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function scrapeCategoryBrackets(excerpt: string | null): DegageCategoryScrape {
+  if (!excerpt) return { brackets: [null, null, null], excerpt: null, confidence: "low" };
+
+  const brackets = BRACKET_LABELS.map(({ pattern, uptoKm }) => {
+    const match = pattern.exec(excerpt);
+    if (!match) return null;
+    const amount = findAmountAfter(excerpt, match.index + match[0].length);
+    return amount !== null ? ({ uptoKm, pricePerKm: amount } satisfies KmBracket) : null;
+  });
+
+  const foundCount = brackets.filter(Boolean).length;
+  const confidence: DegageCategoryScrape["confidence"] =
+    foundCount === 3 ? "high" : foundCount >= 1 ? "medium" : "low";
+
+  return { brackets, excerpt, confidence };
 }
 
 export async function scrapeDegage(
@@ -30,45 +55,20 @@ export async function scrapeDegage(
   const text = await fetchVisibleText(sourceUrl);
   const notes: string[] = [];
 
-  const categoryAExcerpts = findNearby(text, /categorie\s*a\b|category\s*a\b/i, 200);
-  const categoryBExcerpts = findNearby(text, /categorie\s*b\b|category\s*b\b/i, 200);
+  const excerptsA = findNearby(text, /cat(?:egorie|egory)?\.?\s*a\b/i, 400);
+  const excerptsB = findNearby(text, /cat(?:egorie|egory)?\.?\s*b\b/i, 400);
 
-  const categoryAAmounts = categoryAExcerpts.flatMap((ex) =>
-    extractAmountMentions(ex).map((m) => m.amount)
-  );
-  const categoryBAmounts = categoryBExcerpts.flatMap((ex) =>
-    extractAmountMentions(ex).map((m) => m.amount)
-  );
-  const allKmAmounts = extractAmountMentions(text)
-    .filter((m) => m.unit === "km" || m.unit === "unknown")
-    .map((m) => m.amount);
+  const categoryA = scrapeCategoryBrackets(excerptsA[0] ?? null);
+  const categoryB = scrapeCategoryBrackets(excerptsB[0] ?? null);
 
-  const suggestedCategoryA = bestGuess(categoryAAmounts);
-  const suggestedCategoryB = bestGuess(categoryBAmounts);
-
-  let confidence: DegageScrapeResult["confidence"] = "low";
-  if (suggestedCategoryA !== null && suggestedCategoryB !== null) {
-    confidence = suggestedCategoryA !== suggestedCategoryB ? "high" : "medium";
-  }
-
-  if (categoryAExcerpts.length === 0 || categoryBExcerpts.length === 0) {
-    notes.push("Could not find both 'Category A' and 'Category B' mentions on the page.");
+  if (categoryA.confidence !== "high" || categoryB.confidence !== "high") {
+    notes.push(
+      "Could not confidently find all three km brackets (0-100 / 100-200 / 200+) for both categories."
+    );
   }
   notes.push(
     "This is a best-effort text scan, not a structured table parse - always verify against the source before saving."
   );
 
-  return {
-    sourceUrl,
-    fetchedAt: new Date().toISOString(),
-    categoryAAmounts,
-    categoryBAmounts,
-    categoryAExcerpts: categoryAExcerpts.slice(0, 3),
-    categoryBExcerpts: categoryBExcerpts.slice(0, 3),
-    allKmAmounts,
-    confidence,
-    suggestedCategoryA,
-    suggestedCategoryB,
-    notes,
-  };
+  return { sourceUrl, fetchedAt: new Date().toISOString(), categoryA, categoryB, notes };
 }

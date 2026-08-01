@@ -168,8 +168,15 @@ export default function Calculator() {
             {cambioResult.ok && (
               <>
                 <PriceLine label="Time" value={formatEUR(cambioResult.value.timeCost)} sub={formatHours(cambioResult.value.billedHours)} />
-                <PriceLine label="Distance" value={formatEUR(cambioResult.value.kmCost)} sub={`${km} km`} />
+                <PriceLine
+                  label="Distance"
+                  value={formatEUR(cambioResult.value.kmCost)}
+                  sub={`${km} km @ ${formatEUR(cambioResult.value.effectiveKmRate)}/km avg`}
+                />
                 <Total value={cambioResult.value.total} />
+                {cambioResult.value.weeklyRateApplied && (
+                  <p className="text-xs text-neutral-500">Weekly rate applied for full 7-day block(s).</p>
+                )}
                 {cambioResult.value.monthlyFee > 0 && (
                   <p className="text-xs text-neutral-500">
                     + {formatEUR(cambioResult.value.monthlyFee)}/month subscription (not included above)
@@ -189,7 +196,11 @@ export default function Calculator() {
           >
             {degageResult.ok && (
               <>
-                <PriceLine label="Distance" value={formatEUR(degageResult.value.total)} sub={`${km} km × ${formatEUR(degageResult.value.pricePerKm)}`} />
+                <PriceLine
+                  label="Distance"
+                  value={formatEUR(degageResult.value.total)}
+                  sub={`${km} km @ ${formatEUR(degageResult.value.effectiveKmRate)}/km avg`}
+                />
                 <Total value={degageResult.value.total} />
                 <p className="text-xs text-neutral-500">Fuel included, no time-based or subscription fee.</p>
               </>

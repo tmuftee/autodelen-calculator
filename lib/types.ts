@@ -6,17 +6,18 @@ export interface CarCategory {
   description?: string;
 }
 
-export interface CambioCategoryRate {
-  categoryId: string;
-  hourlyRate: number; // EUR per hour
-  dayRate: number; // EUR per day (cap on the time-based cost for a full 24h block)
-  kmRate: number; // EUR per km (flat, used when no brackets are defined)
-  kmBrackets?: KmBracket[]; // optional tiered km pricing, overrides kmRate when present
-}
-
 export interface KmBracket {
   uptoKm: number | null; // null = unbounded (last bracket)
   pricePerKm: number;
+}
+
+export interface CambioCategoryRate {
+  categoryId: string;
+  dayHourlyRate: number; // EUR per hour, 06:00-24:00
+  nightHourlyRate: number; // EUR per hour, 00:00-06:00
+  dayRate: number; // EUR cap on the time-based cost for a single calendar day
+  weeklyRate: number; // EUR cap for a full 7 consecutive calendar days
+  kmBrackets: KmBracket[]; // tiered km pricing, e.g. 0-100km then 100km+
 }
 
 export interface CambioPackagePricing {
@@ -40,7 +41,7 @@ export interface DegageCategoryRate {
   categoryId: DegageCategoryId;
   name: string;
   description?: string;
-  pricePerKm: number; // EUR per km, fuel included
+  kmBrackets: KmBracket[]; // tiered km pricing, e.g. 0-100 / 100-200 / 200+, fuel included
 }
 
 export interface DegagePricingData {
@@ -65,16 +66,26 @@ export interface CambioCalcInput {
   km: number;
 }
 
+export interface CambioDaySegment {
+  date: string; // YYYY-MM-DD, local calendar day
+  dayHours: number; // hours billed at the 06:00-24:00 rate
+  nightHours: number; // hours billed at the 00:00-06:00 rate
+  cost: number; // capped at dayRate
+}
+
 export interface CambioCalcResult {
   hours: number;
   billedHours: number; // rounded up to nearest 15 min
-  days: number;
+  days: CambioDaySegment[];
+  weeklyRateApplied: boolean;
   timeCost: number;
   kmCost: number;
   total: number;
   monthlyFee: number;
-  hourlyRate: number;
+  dayHourlyRate: number;
+  nightHourlyRate: number;
   dayRate: number;
+  weeklyRate: number;
   effectiveKmRate: number;
 }
 
@@ -85,6 +96,7 @@ export interface DegageCalcInput {
 
 export interface DegageCalcResult {
   km: number;
-  pricePerKm: number;
+  kmCost: number;
   total: number;
+  effectiveKmRate: number;
 }
