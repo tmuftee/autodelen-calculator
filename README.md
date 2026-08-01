@@ -21,12 +21,13 @@ carsharing trip prices between **Cambio** and **Dégage**.
   highlighting the cheaper option.
 
 The full pricing model lives in `lib/calc.ts` (`calculateCambio` /
-`calculateDegage`) and `lib/types.ts`. Cambio's day/day-cap/week-cap
-interaction is an interpretation of the publicly described structure (no
-official rulebook was available while building this) — the "day-by-day,
-capped, with the cheaper of daily-caps-summed vs. a weekly-cap" logic is
-documented inline in `calc.ts` and should be checked against cambio.be's
-actual terms if the exact cap precedence matters for your use case.
+`calculateDegage`) and `lib/types.ts`. Cambio's seed numbers
+(`lib/pricing-seed.ts`) are transcribed from its Start/Bonus/Comfort x
+S/M/L/XL pricing tables; the day/day-cap/week-cap interaction (day-by-day,
+capped, with the cheaper of daily-caps-summed vs. a weekly-cap) is this
+project's interpretation of that structure, documented inline in
+`calc.ts` — check it against cambio.be's actual terms if the exact cap
+precedence matters for your use case.
 
 ## Pricing data & the update mechanism
 
@@ -38,32 +39,29 @@ refreshed without a redeploy.
 **`/admin`** is the pricing console:
 
 1. **Fetch latest** — calls `POST /api/pricing/update`, which fetches
-   `cambio.be` and `degage.be` live and runs a best-effort text scan
-   (`lib/scrape-cambio.ts`, `lib/scrape-degage.ts`) for euro amounts near
-   package/category names and Dégage's `0-100 km` / `100-200 km` / `vanaf
-   201 km` bracket labels. It reports a confidence level and shows the raw
-   matches — this is a starting point for a human to check, not a
-   guaranteed structured parse of either page. Cambio's page also has some
-   tiers inside expandable sections that may only load via JavaScript,
-   which a plain HTML fetch can miss.
-2. **Review & edit** — every rate is editable inline. Dégage's high-confidence
-   suggestions (all 3 km brackets found for a category) can be applied with
-   one click. Cambio's larger package × category × time-band × km-bracket
-   matrix always needs a human glance since a text scan can't safely
-   reconstruct a whole pricing table unattended.
+   `cambio.be` and `degage.be` live and parses their actual HTML:
+   - `lib/scrape-cambio.ts` walks each package's `.block-content--type-pricing`
+     block and reads its `table.tablefield` rows directly (monthly/activation
+     fee, then each class's day/night hourly rate, day cap, week cap, and
+     the two km-bracket rates), matched by table `<caption>` text. A
+     package is marked "complete" only if every field for every class (S/M/L/XL)
+     was found.
+   - `lib/scrape-degage.ts` looks for the `0-100 km` / `100-200 km` / `vanaf
+     201 km` bracket labels near each category's heading.
+   - Both are structural parses, not guesses, but still tied to today's
+     markup — if cambio.be or degage.be redesign their pricing page, a
+     scrape can come back incomplete (or wrong) and should be checked
+     against the source link before saving.
+2. **Review & edit** — every rate is editable inline, and a "complete"
+   package/category from the scrape can be applied with one click.
 3. **Save** — persists to Vercel KV / Upstash Redis if configured (see
    below). Without persistence, Save shows the JSON to paste into
    `lib/pricing-seed.ts` before redeploying.
 
 A daily Vercel Cron job (`vercel.json` → `/api/cron/update-pricing`) reruns
-the same scrape. It auto-applies Dégage's numbers when confident and
-persistence is configured; Cambio is left for manual review via `/admin`.
-
-> The sandbox this app was built in has no outbound access to cambio.be or
-> degage.be, so the shipped seed numbers are placeholders (flagged
-> `needsReview` in the data and with a banner in the UI). Once deployed to
-> Vercel, run **Fetch latest** on `/admin` to pull and confirm the real
-> numbers.
+both scrapes and auto-applies whatever comes back "complete" when
+persistence is configured; anything incomplete is left alone (and Cambio's
+`needsReview` flag is set) for a human to check via `/admin`.
 
 ### Optional: enable persistent pricing updates
 

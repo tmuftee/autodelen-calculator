@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 
 export interface AmountMention {
   amount: number;
@@ -9,7 +10,7 @@ export interface AmountMention {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-export async function fetchVisibleText(url: string): Promise<string> {
+export async function fetchHtml(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: {
       "User-Agent": UA,
@@ -22,11 +23,39 @@ export async function fetchVisibleText(url: string): Promise<string> {
   if (!res.ok) {
     throw new Error(`Fetch failed for ${url}: HTTP ${res.status}`);
   }
-  const html = await res.text();
+  return res.text();
+}
+
+export async function fetchVisibleText(url: string): Promise<string> {
+  const html = await fetchHtml(url);
   const $ = cheerio.load(html);
   $("script, style, noscript, svg").remove();
   const text = $("body").text();
   return text.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+}
+
+/** Parses a euro amount out of arbitrary cell text, e.g. "€ 2.35 " -> 2.35. */
+export function parseEuroAmount(value: string): number | null {
+  const match = /-?\d+(?:[.,]\d+)?/.exec(value.replace(/€/g, ""));
+  if (!match) return null;
+  const amount = parseFloat(match[0].replace(",", "."));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+/** Reads a two-column HTML table (thead + tbody rows) as [label, value] pairs. */
+export function tableRows(
+  $: cheerio.CheerioAPI,
+  table: cheerio.Cheerio<AnyNode>
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  table.find("tr").each((_, tr) => {
+    const cells = $(tr).find("th, td");
+    if (cells.length < 2) return;
+    const label = $(cells[0]).text().replace(/\s+/g, " ").trim();
+    const value = $(cells[1]).text().replace(/\s+/g, " ").trim();
+    if (label) rows.push({ label, value });
+  });
+  return rows;
 }
 
 const UNIT_PATTERNS: [RegExp, AmountMention["unit"]][] = [

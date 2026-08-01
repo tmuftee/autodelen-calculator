@@ -11,13 +11,11 @@ function isBracket(b: KmBracket | null): b is KmBracket {
 /**
  * Intended to be hit periodically by Vercel Cron (see vercel.json).
  *
- * Dégage's pricing is a small, fixed-shape km-bracket table per category, so
- * when the scrape confidently finds all three brackets for both categories
- * it's auto-applied. Cambio's pricing is a much larger package x category x
- * time-band x km-bracket matrix (some of it behind expandable sections),
- * which a text scan can't safely reconstruct unattended, so cron only
- * records that a check happened and leaves `needsReview` for a human to
- * reconcile via /admin.
+ * Both scrapers parse the sites' actual table markup rather than guessing
+ * from plain text, so when a package/category comes back "complete" it's
+ * auto-applied (persistence permitting). Anything incomplete is left alone
+ * for a human to reconcile via /admin - the site's markup could always
+ * change again.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -28,9 +26,54 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const { data: current } = await getPricing();
+  const { data: fetched } = await getPricing();
+  // Clone since `fetched` may be the shared SEED_PRICING module object when
+  // no persistence is configured - mutating it in place would leak across
+  // requests on the same warm serverless instance.
+  const current = structuredClone(fetched);
   const now = new Date().toISOString();
   const summary: Record<string, unknown> = { checkedAt: now };
+  const canPersist = isPersistenceConfigured();
+
+  try {
+    const cambioScrape = await scrapeCambio();
+    summary.cambio = {
+      confidence: cambioScrape.confidence,
+      complete: cambioScrape.packages.filter((p) => p.complete).map((p) => p.packageId),
+      notes: cambioScrape.notes,
+    };
+
+    if (canPersist) {
+      let cambioUpdated = false;
+      for (const scraped of cambioScrape.packages) {
+        if (!scraped.complete || !scraped.packageId) continue;
+        const pkg = current.cambio.packages.find((p) => p.id === scraped.packageId);
+        if (!pkg) continue;
+        pkg.monthlyFee = scraped.monthlyFee!;
+        pkg.activationFee = scraped.activationFee!;
+        for (const sr of scraped.rates) {
+          const rate = pkg.rates.find((r) => r.categoryId === sr.categoryId);
+          if (!rate) continue;
+          rate.dayHourlyRate = sr.dayHourlyRate!;
+          rate.nightHourlyRate = sr.nightHourlyRate!;
+          rate.dayRate = sr.dayRate!;
+          rate.weeklyRate = sr.weeklyRate!;
+          rate.kmBrackets = [
+            { uptoKm: 100, pricePerKm: sr.kmUnder100! },
+            { uptoKm: null, pricePerKm: sr.kmOver100! },
+          ];
+        }
+        cambioUpdated = true;
+      }
+      if (cambioUpdated) {
+        current.cambio.asOf = now.slice(0, 10);
+        current.cambio.needsReview = cambioScrape.packages.some((p) => !p.complete);
+        summary.cambioUpdated = true;
+      }
+    }
+  } catch (err) {
+    summary.cambioError = err instanceof Error ? err.message : String(err);
+  }
 
   try {
     const degageScrape = await scrapeDegage();
@@ -45,7 +88,7 @@ export async function GET(req: NextRequest) {
     const aComplete = bracketsA.every((b) => b !== null);
     const bComplete = bracketsB.every((b) => b !== null);
 
-    if (aComplete && bComplete && isPersistenceConfigured()) {
+    if (aComplete && bComplete && canPersist) {
       current.degage = {
         ...current.degage,
         asOf: now.slice(0, 10),
@@ -64,15 +107,8 @@ export async function GET(req: NextRequest) {
     summary.degageError = err instanceof Error ? err.message : String(err);
   }
 
-  try {
-    const cambioScrape = await scrapeCambio();
-    summary.cambio = { confidence: cambioScrape.confidence, notes: cambioScrape.notes };
-  } catch (err) {
-    summary.cambioError = err instanceof Error ? err.message : String(err);
-  }
-
   current.lastAutoCheck = now;
-  if (isPersistenceConfigured()) {
+  if (canPersist) {
     await savePricing(current);
   }
 

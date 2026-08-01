@@ -4,24 +4,29 @@ import { useEffect, useState } from "react";
 import { formatEUR } from "@/lib/format";
 import { KmBracket, PricingData } from "@/lib/types";
 
-interface AmountMention {
-  amount: number;
-  context: string;
-  unit: string;
+interface ScrapedCambioRate {
+  categoryId: string;
+  dayHourlyRate: number | null;
+  nightHourlyRate: number | null;
+  dayRate: number | null;
+  weeklyRate: number | null;
+  kmUnder100: number | null;
+  kmOver100: number | null;
+}
+
+interface ScrapedCambioPackage {
+  packageId: "start" | "bonus" | "comfort" | null;
+  name: string;
+  monthlyFee: number | null;
+  activationFee: number | null;
+  rates: ScrapedCambioRate[];
+  complete: boolean;
 }
 
 interface CambioScrape {
   sourceUrl: string;
   fetchedAt: string;
-  packagesDetected: string[];
-  categoriesDetected: string[];
-  dayNightMentioned: boolean;
-  km100BracketMentioned: boolean;
-  weeklyRateMentioned: boolean;
-  hourlyAmounts: AmountMention[];
-  kmAmounts: AmountMention[];
-  dayAmounts: AmountMention[];
-  weekAmounts: AmountMention[];
+  packages: ScrapedCambioPackage[];
   confidence: string;
   notes: string[];
   error?: string;
@@ -170,6 +175,17 @@ export default function AdminClient() {
     });
   }
 
+  function updateActivationFee(packageId: string, value: number) {
+    if (!editing) return;
+    setEditing({
+      ...editing,
+      cambio: {
+        ...editing.cambio,
+        packages: editing.cambio.packages.map((p) => (p.id === packageId ? { ...p, activationFee: value } : p)),
+      },
+    });
+  }
+
   function updateDegageKmBracket(categoryId: "A" | "B", bracketIndex: number, value: number) {
     if (!editing) return;
     setEditing({
@@ -194,6 +210,40 @@ export default function AdminClient() {
         ...editing.degage,
         categories: editing.degage.categories.map((c) =>
           c.categoryId === categoryId ? { ...c, kmBrackets: brackets as KmBracket[] } : c
+        ),
+      },
+    });
+  }
+
+  function applyCambioPackage(scraped: ScrapedCambioPackage) {
+    if (!editing || !scraped.complete || !scraped.packageId) return;
+    setEditing({
+      ...editing,
+      cambio: {
+        ...editing.cambio,
+        packages: editing.cambio.packages.map((p) =>
+          p.id === scraped.packageId
+            ? {
+                ...p,
+                monthlyFee: scraped.monthlyFee!,
+                activationFee: scraped.activationFee!,
+                rates: p.rates.map((r) => {
+                  const sr = scraped.rates.find((x) => x.categoryId === r.categoryId);
+                  if (!sr) return r;
+                  return {
+                    ...r,
+                    dayHourlyRate: sr.dayHourlyRate!,
+                    nightHourlyRate: sr.nightHourlyRate!,
+                    dayRate: sr.dayRate!,
+                    weeklyRate: sr.weeklyRate!,
+                    kmBrackets: [
+                      { uptoKm: 100, pricePerKm: sr.kmUnder100! },
+                      { uptoKm: null, pricePerKm: sr.kmOver100! },
+                    ],
+                  };
+                }),
+              }
+            : p
         ),
       },
     });
@@ -231,8 +281,9 @@ export default function AdminClient() {
           </button>
         </div>
         <p className="text-xs text-neutral-500">
-          Pulls the live pages and extracts candidate numbers as a starting point. This is a best-effort text scan, not a
-          guaranteed structured parse — always cross-check against the source links before saving.
+          Pulls the live pages and parses their pricing tables directly. A package/category marked
+          &quot;complete&quot; had every field found and can be applied with one click — anything incomplete (or if the
+          site&apos;s markup changes) still needs a manual check against the source link.
         </p>
 
         {scrape && (
@@ -245,16 +296,40 @@ export default function AdminClient() {
               notes={scrape.cambio.notes}
             >
               {!scrape.cambio.error && (
-                <div className="flex flex-col gap-1 text-xs text-neutral-600 dark:text-neutral-400">
-                  <p>Packages detected: {scrape.cambio.packagesDetected.join(", ") || "none"}</p>
-                  <p>Categories detected: {scrape.cambio.categoriesDetected.join(", ") || "none"}</p>
-                  <p>Day/night rate split mentioned: {scrape.cambio.dayNightMentioned ? "yes" : "no"}</p>
-                  <p>100 km price-break mentioned: {scrape.cambio.km100BracketMentioned ? "yes" : "no"}</p>
-                  <p>Weekly rate mentioned: {scrape.cambio.weeklyRateMentioned ? "yes" : "no"}</p>
-                  <p>Hourly amounts seen: {scrape.cambio.hourlyAmounts.map((a) => a.amount).join(", ") || "none"}</p>
-                  <p>Day-cap amounts seen: {scrape.cambio.dayAmounts.map((a) => a.amount).join(", ") || "none"}</p>
-                  <p>Week amounts seen: {scrape.cambio.weekAmounts.map((a) => a.amount).join(", ") || "none"}</p>
-                  <p>Km amounts seen: {scrape.cambio.kmAmounts.map((a) => a.amount).join(", ") || "none"}</p>
+                <div className="flex flex-col gap-3 text-xs text-neutral-600 dark:text-neutral-400">
+                  {scrape.cambio.packages.length === 0 && <p>No pricing blocks found.</p>}
+                  {scrape.cambio.packages.map((pkg) => (
+                    <div key={pkg.name}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{pkg.name}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            pkg.complete
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                              : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                          }`}
+                        >
+                          {pkg.complete ? "complete" : "incomplete"}
+                        </span>
+                        {isEditing && pkg.complete && (
+                          <button className="underline underline-offset-2" onClick={() => applyCambioPackage(pkg)}>
+                            apply
+                          </button>
+                        )}
+                      </div>
+                      <p>
+                        Monthly {pkg.monthlyFee !== null ? formatEUR(pkg.monthlyFee) : "—"} · Activation{" "}
+                        {pkg.activationFee !== null ? formatEUR(pkg.activationFee) : "—"}
+                      </p>
+                      {pkg.rates.map((r) => (
+                        <p key={r.categoryId}>
+                          {r.categoryId}: day {r.dayHourlyRate ?? "—"}/h, night {r.nightHourlyRate ?? "—"}/h, day cap{" "}
+                          {r.dayRate ?? "—"}, week cap {r.weeklyRate ?? "—"}, km ≤100 {r.kmUnder100 ?? "—"}, km 100+{" "}
+                          {r.kmOver100 ?? "—"}
+                        </p>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               )}
             </ScrapePanel>
@@ -354,21 +429,36 @@ export default function AdminClient() {
         </p>
         {draft.cambio.packages.map((pkg) => (
           <div key={pkg.id} className="overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
-            <div className="flex items-center justify-between bg-neutral-50 px-4 py-2 dark:bg-neutral-900">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-neutral-50 px-4 py-2 dark:bg-neutral-900">
               <span className="text-sm font-medium">{pkg.name}</span>
-              <label className="flex items-center gap-2 text-xs text-neutral-500">
-                Monthly fee (€)
-                {isEditing ? (
-                  <input
-                    type="number"
-                    className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
-                    value={pkg.monthlyFee}
-                    onChange={(e) => updateMonthlyFee(pkg.id, Number(e.target.value))}
-                  />
-                ) : (
-                  <span>{formatEUR(pkg.monthlyFee)}</span>
-                )}
-              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-neutral-500">
+                  Monthly fee (€)
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                      value={pkg.monthlyFee}
+                      onChange={(e) => updateMonthlyFee(pkg.id, Number(e.target.value))}
+                    />
+                  ) : (
+                    <span>{formatEUR(pkg.monthlyFee)}</span>
+                  )}
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-500">
+                  Activation fee (€)
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                      value={pkg.activationFee}
+                      onChange={(e) => updateActivationFee(pkg.id, Number(e.target.value))}
+                    />
+                  ) : (
+                    <span>{formatEUR(pkg.activationFee)}</span>
+                  )}
+                </label>
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead>

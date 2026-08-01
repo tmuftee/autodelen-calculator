@@ -154,6 +154,7 @@ export function calculateCambio(
     kmCost,
     total,
     monthlyFee: pkg.monthlyFee,
+    activationFee: pkg.activationFee,
     dayHourlyRate: rate.dayHourlyRate,
     nightHourlyRate: rate.nightHourlyRate,
     dayRate: rate.dayRate,

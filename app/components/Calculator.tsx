@@ -177,11 +177,12 @@ export default function Calculator() {
                 {cambioResult.value.weeklyRateApplied && (
                   <p className="text-xs text-neutral-500">Weekly rate applied for full 7-day block(s).</p>
                 )}
-                {cambioResult.value.monthlyFee > 0 && (
-                  <p className="text-xs text-neutral-500">
-                    + {formatEUR(cambioResult.value.monthlyFee)}/month subscription (not included above)
-                  </p>
-                )}
+                <p className="text-xs text-neutral-500">
+                  + {formatEUR(cambioResult.value.monthlyFee)}/month subscription
+                  {cambioResult.value.activationFee > 0 &&
+                    ` + ${formatEUR(cambioResult.value.activationFee)} one-time activation`}{" "}
+                  (not included above)
+                </p>
               </>
             )}
           </ResultCard>

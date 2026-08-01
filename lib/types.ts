@@ -24,6 +24,7 @@ export interface CambioPackagePricing {
   id: CambioPackageId;
   name: string;
   monthlyFee: number; // EUR/month subscription fee (informational, not part of a single trip cost)
+  activationFee: number; // EUR, one-time (informational, not part of a single trip cost)
   rates: CambioCategoryRate[];
 }
 
@@ -82,6 +83,7 @@ export interface CambioCalcResult {
   kmCost: number;
   total: number;
   monthlyFee: number;
+  activationFee: number;
   dayHourlyRate: number;
   nightHourlyRate: number;
   dayRate: number;
