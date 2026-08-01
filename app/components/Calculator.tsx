@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalcError, calculateCambio, calculateDegage } from "@/lib/calc";
-import { defaultDateTimeRange, formatEUR, formatHours } from "@/lib/format";
+import { addMinutes, defaultDateTimeRange, diffMinutesRoundedToQuarter, formatEUR, formatHours } from "@/lib/format";
 import { CambioPackageId, DegageCategoryId, PricingData } from "@/lib/types";
-import { Field, inputClass, selectClass } from "./Field";
+import { Field, NumberField, inputClass, selectClass } from "./Field";
 
 type Provider = "cambio" | "degage" | "both";
+type EndMode = "datetime" | "duration";
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   cambio: "Cambio",
@@ -24,6 +25,24 @@ export default function Calculator() {
   const [degageCategoryId, setDegageCategoryId] = useState<DegageCategoryId>("A");
   const [{ start, end }, setRange] = useState(defaultDateTimeRange());
   const [km, setKm] = useState<number>(50);
+  const [endMode, setEndMode] = useState<EndMode>("datetime");
+  const [durationHours, setDurationHours] = useState<number>(4);
+  const [durationMinutes, setDurationMinutes] = useState<number>(0);
+
+  const effectiveEnd =
+    endMode === "datetime" ? end : addMinutes(start, durationHours * 60 + durationMinutes);
+
+  function switchToDatetime() {
+    setRange((r) => ({ ...r, end: effectiveEnd }));
+    setEndMode("datetime");
+  }
+
+  function switchToDuration() {
+    const totalMinutes = diffMinutesRoundedToQuarter(start, end);
+    setDurationHours(Math.floor(totalMinutes / 60));
+    setDurationMinutes(totalMinutes % 60);
+    setEndMode("duration");
+  }
 
   useEffect(() => {
     fetch("/api/pricing")
@@ -41,11 +60,14 @@ export default function Calculator() {
   const cambioResult = useMemo(() => {
     if (!pricing || !showCambio || !categoryId) return null;
     try {
-      return { ok: true as const, value: calculateCambio({ packageId, categoryId, start, end, km }, pricing.cambio) };
+      return {
+        ok: true as const,
+        value: calculateCambio({ packageId, categoryId, start, end: effectiveEnd, km }, pricing.cambio),
+      };
     } catch (err) {
       return { ok: false as const, error: err instanceof CalcError ? err.message : "Could not calculate Cambio price." };
     }
-  }, [pricing, showCambio, packageId, categoryId, start, end, km]);
+  }, [pricing, showCambio, packageId, categoryId, start, effectiveEnd, km]);
 
   const degageResult = useMemo(() => {
     if (!pricing || !showDegage) return null;
@@ -134,26 +156,60 @@ export default function Calculator() {
           />
         </Field>
 
-        <Field label="End date &amp; time" htmlFor="end">
-          <input
-            id="end"
-            type="datetime-local"
-            className={inputClass}
-            value={end}
-            onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))}
-          />
-        </Field>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label htmlFor={endMode === "datetime" ? "end" : "duration-hours"} className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Trip length
+            </label>
+            <div className="flex gap-0.5 rounded-lg bg-neutral-100 p-0.5 text-xs dark:bg-neutral-800">
+              <button
+                type="button"
+                onClick={switchToDatetime}
+                className={`rounded-md px-2 py-1 font-medium transition ${
+                  endMode === "datetime"
+                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-950 dark:text-white"
+                    : "text-neutral-500 dark:text-neutral-400"
+                }`}
+              >
+                End time
+              </button>
+              <button
+                type="button"
+                onClick={switchToDuration}
+                className={`rounded-md px-2 py-1 font-medium transition ${
+                  endMode === "duration"
+                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-950 dark:text-white"
+                    : "text-neutral-500 dark:text-neutral-400"
+                }`}
+              >
+                Duration
+              </button>
+            </div>
+          </div>
+          {endMode === "datetime" ? (
+            <input
+              id="end"
+              type="datetime-local"
+              className={inputClass}
+              value={end}
+              onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))}
+            />
+          ) : (
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <NumberField id="duration-hours" min={0} step={1} value={durationHours} onChange={setDurationHours} />
+                <span className="mt-1 block text-center text-xs text-neutral-500">hours</span>
+              </div>
+              <div className="flex-1">
+                <NumberField min={0} max={45} step={15} value={durationMinutes} onChange={setDurationMinutes} />
+                <span className="mt-1 block text-center text-xs text-neutral-500">minutes</span>
+              </div>
+            </div>
+          )}
+        </div>
 
         <Field label="Distance (km)" htmlFor="km">
-          <input
-            id="km"
-            type="number"
-            min={0}
-            inputMode="decimal"
-            className={inputClass}
-            value={km}
-            onChange={(e) => setKm(Math.max(0, Number(e.target.value)))}
-          />
+          <NumberField id="km" min={0} step={1} value={km} onChange={setKm} />
         </Field>
       </div>
 

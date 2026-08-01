@@ -23,7 +23,13 @@ body {
   color: var(--foreground);
 }
 
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  opacity: 1;
+/* NumberField draws its own up/down buttons, so hide the native ones. */
+.no-native-spinner::-webkit-inner-spin-button,
+.no-native-spinner::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.no-native-spinner {
+  -moz-appearance: textfield;
 }

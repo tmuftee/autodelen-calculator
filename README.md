@@ -5,7 +5,9 @@ carsharing trip prices between **Cambio** and **Dégage**.
 
 - Pick Cambio, Dégage, or both.
 - **Cambio**: choose a package (Start / Bonus / Comfort), car category,
-  start/end date & time, and distance.
+  start date & time, and distance. Trip length can be entered either as an
+  explicit end date & time, or as a duration in hours + 15-minute
+  increments added to the start time.
   - Hourly rate depends on time of day: a day rate (06:00-24:00) and a
     cheaper night rate (00:00-06:00), split per calendar day the trip
     touches.
@@ -36,7 +38,8 @@ Live rates aren't hardcoded from a single fetch — they live in
 small persistence layer (`lib/pricing-store.ts`) so the whole app can be
 refreshed without a redeploy.
 
-**`/admin`** is the pricing console:
+**`/admin`** is the pricing console, gated behind HTTP Basic Auth (see
+"Admin password" below) so only you can view or change it:
 
 1. **Fetch latest** — calls `POST /api/pricing/update`, which fetches
    `cambio.be` and `degage.be` live and parses their actual HTML:
@@ -62,6 +65,18 @@ A daily Vercel Cron job (`vercel.json` → `/api/cron/update-pricing`) reruns
 both scrapes and auto-applies whatever comes back "complete" when
 persistence is configured; anything incomplete is left alone (and Cambio's
 `needsReview` flag is set) for a human to check via `/admin`.
+
+### Admin password
+
+`/admin` (the page itself, plus `POST /api/pricing` and `POST
+/api/pricing/update`) is protected by `proxy.ts` using HTTP Basic Auth. Set an `ADMIN_PASSWORD` environment variable — any username is
+accepted, only the password is checked. Without `ADMIN_PASSWORD` set, the
+admin routes are disabled entirely (503) rather than left open, so a
+deployment can never accidentally ship an unprotected admin page. The
+public calculator and `GET /api/pricing` are unaffected either way.
+
+In Vercel: **Settings → Environment Variables** → add `ADMIN_PASSWORD`.
+Locally, put it in `.env.local` (already gitignored).
 
 ### Optional: enable persistent pricing updates
 

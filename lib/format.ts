@@ -30,9 +30,23 @@ export function defaultDateTimeRange(): { start: string; end: string } {
   return { start, end };
 }
 
-function toLocalInputValue(date: Date): string {
+export function toLocalInputValue(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
     date.getHours()
   )}:${pad(date.getMinutes())}`;
+}
+
+/** Adds a duration in minutes to an ISO datetime-local string, returning a new one. */
+export function addMinutes(datetimeLocal: string, minutes: number): string {
+  const date = new Date(datetimeLocal);
+  return toLocalInputValue(new Date(date.getTime() + minutes * 60 * 1000));
+}
+
+/** Difference in whole minutes between two datetime-local strings, rounded to the nearest 15. */
+export function diffMinutesRoundedToQuarter(startLocal: string, endLocal: string): number {
+  const start = new Date(startLocal);
+  const end = new Date(endLocal);
+  const rawMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+  return Math.max(0, Math.round(rawMinutes / 15) * 15);
 }

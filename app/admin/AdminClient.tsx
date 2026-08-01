@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatEUR } from "@/lib/format";
 import { KmBracket, PricingData } from "@/lib/types";
+import { NumberField } from "../components/Field";
 
 interface ScrapedCambioRate {
   categoryId: string;
@@ -435,11 +436,12 @@ export default function AdminClient() {
                 <label className="flex items-center gap-2 text-xs text-neutral-500">
                   Monthly fee (€)
                   {isEditing ? (
-                    <input
-                      type="number"
-                      className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                    <NumberField
+                      className="w-24"
+                      step={1}
+                      min={0}
                       value={pkg.monthlyFee}
-                      onChange={(e) => updateMonthlyFee(pkg.id, Number(e.target.value))}
+                      onChange={(v) => updateMonthlyFee(pkg.id, v)}
                     />
                   ) : (
                     <span>{formatEUR(pkg.monthlyFee)}</span>
@@ -448,11 +450,12 @@ export default function AdminClient() {
                 <label className="flex items-center gap-2 text-xs text-neutral-500">
                   Activation fee (€)
                   {isEditing ? (
-                    <input
-                      type="number"
-                      className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                    <NumberField
+                      className="w-24"
+                      step={1}
+                      min={0}
                       value={pkg.activationFee}
-                      onChange={(e) => updateActivationFee(pkg.id, Number(e.target.value))}
+                      onChange={(v) => updateActivationFee(pkg.id, v)}
                     />
                   ) : (
                     <span>{formatEUR(pkg.activationFee)}</span>
@@ -481,12 +484,12 @@ export default function AdminClient() {
                     {(["dayHourlyRate", "nightHourlyRate", "dayRate", "weeklyRate"] as const).map((field) => (
                       <td key={field} className="px-4 py-2">
                         {isEditing ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                          <NumberField
+                            className="w-24"
+                            step={0.01}
+                            min={0}
                             value={rate[field]}
-                            onChange={(e) => updateCambioField(pkg.id, rate.categoryId, field, Number(e.target.value))}
+                            onChange={(v) => updateCambioField(pkg.id, rate.categoryId, field, v)}
                           />
                         ) : (
                           formatEUR(rate[field])
@@ -496,12 +499,12 @@ export default function AdminClient() {
                     {rate.kmBrackets.map((bracket, i) => (
                       <td key={i} className="px-4 py-2">
                         {isEditing ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                          <NumberField
+                            className="w-24"
+                            step={0.01}
+                            min={0}
                             value={bracket.pricePerKm}
-                            onChange={(e) => updateCambioKmBracket(pkg.id, rate.categoryId, i, Number(e.target.value))}
+                            onChange={(v) => updateCambioKmBracket(pkg.id, rate.categoryId, i, v)}
                           />
                         ) : (
                           formatEUR(bracket.pricePerKm)
@@ -538,12 +541,12 @@ export default function AdminClient() {
                   {c.kmBrackets.map((bracket, i) => (
                     <td key={i} className="px-4 py-2">
                       {isEditing ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="w-20 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-950"
+                        <NumberField
+                          className="w-24"
+                          step={0.01}
+                          min={0}
                           value={bracket.pricePerKm}
-                          onChange={(e) => updateDegageKmBracket(c.categoryId, i, Number(e.target.value))}
+                          onChange={(v) => updateDegageKmBracket(c.categoryId, i, v)}
                         />
                       ) : (
                         formatEUR(bracket.pricePerKm)
