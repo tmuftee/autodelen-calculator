@@ -68,12 +68,27 @@ persistence is configured; anything incomplete is left alone (and Cambio's
 
 ### Admin password
 
-`/admin` (the page itself, plus `POST /api/pricing` and `POST
-/api/pricing/update`) is protected by `proxy.ts` using HTTP Basic Auth. Set an `ADMIN_PASSWORD` environment variable — any username is
-accepted, only the password is checked. Without `ADMIN_PASSWORD` set, the
-admin routes are disabled entirely (503) rather than left open, so a
-deployment can never accidentally ship an unprotected admin page. The
-public calculator and `GET /api/pricing` are unaffected either way.
+Set an `ADMIN_PASSWORD` environment variable and `/admin` shows a simple
+password form (`app/admin/LoginForm.tsx`) instead of the pricing console
+until it's entered. On success, `POST /api/admin/login`
+(`app/api/admin/login/route.ts`) sets an HttpOnly cookie containing a hash
+of the password (never the password itself); `POST /api/pricing` and
+`POST /api/pricing/update` check that same cookie
+(`lib/admin-auth.ts` → `isAdminRequest`) before doing anything, and
+`app/admin/page.tsx` checks it server-side before rendering the console.
+`POST /api/admin/logout` clears the cookie ("Log out" link on `/admin`).
+
+Without `ADMIN_PASSWORD` set, the login form always rejects (there's no
+password to match), so the admin console can never accidentally ship
+unlocked. The public calculator and `GET /api/pricing` are unaffected
+either way - this only gates the admin page and its two write endpoints.
+
+This is deliberately just Server Components, Route Handlers, and cookies
+rather than Next.js Middleware/Proxy, since an earlier version of this
+gate used `middleware.ts`/`proxy.ts` and that broke the whole app in
+production (the entire site required the password, not just `/admin`) -
+this cookie-based approach has no edge-runtime routing layer to
+misconfigure.
 
 In Vercel: **Settings → Environment Variables** → add `ADMIN_PASSWORD`.
 Locally, put it in `.env.local` (already gitignored).

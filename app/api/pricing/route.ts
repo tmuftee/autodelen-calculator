@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminRequest } from "@/lib/admin-auth";
 import { getPricing, isPersistenceConfigured, savePricing } from "@/lib/pricing-store";
 import { PricingData } from "@/lib/types";
 
@@ -21,6 +22,10 @@ function isValidPricingData(value: unknown): value is PricingData {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   if (!isPersistenceConfigured()) {
     return NextResponse.json(
       {

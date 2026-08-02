@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { isAdminRequest } from "@/lib/admin-auth";
 import { scrapeCambio } from "@/lib/scrape-cambio";
 import { scrapeDegage } from "@/lib/scrape-degage";
 
@@ -7,7 +8,11 @@ import { scrapeDegage } from "@/lib/scrape-degage";
  * for an admin to review. This never persists anything by itself - see
  * POST /api/pricing to save reviewed values.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const [cambioResult, degageResult] = await Promise.allSettled([scrapeCambio(), scrapeDegage()]);
 
   return NextResponse.json({
