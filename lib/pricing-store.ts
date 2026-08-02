@@ -1,5 +1,6 @@
 import { PricingData } from "./types";
 import { SEED_PRICING } from "./pricing-seed";
+import { isValidPricingData } from "./validate-pricing";
 
 const STORE_KEY = "autodelen:pricing";
 
@@ -36,7 +37,11 @@ async function kvGet(): Promise<PricingData | null> {
   const body = (await res.json()) as { result: string | null };
   if (!body.result) return null;
   try {
-    return JSON.parse(body.result) as PricingData;
+    const parsed: unknown = JSON.parse(body.result);
+    // Stored data may predate a schema change (e.g. saved by an older
+    // deploy) - never trust it blindly, fall back to the seed instead of
+    // crashing the app on a missing field.
+    return isValidPricingData(parsed) ? parsed : null;
   } catch {
     return null;
   }

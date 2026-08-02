@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPricing, isPersistenceConfigured, savePricing } from "@/lib/pricing-store";
-import { PricingData } from "@/lib/types";
+import { isValidPricingData } from "@/lib/validate-pricing";
 
 export async function GET() {
   const { data, persisted } = await getPricing();
@@ -9,15 +9,6 @@ export async function GET() {
     persisted,
     persistenceConfigured: isPersistenceConfigured(),
   });
-}
-
-function isValidPricingData(value: unknown): value is PricingData {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  if (!v.cambio || !v.degage || typeof v.lastUpdated !== "string") return false;
-  const cambio = v.cambio as Record<string, unknown>;
-  const degage = v.degage as Record<string, unknown>;
-  return Array.isArray(cambio.packages) && Array.isArray(cambio.categories) && Array.isArray(degage.categories);
 }
 
 export async function POST(req: NextRequest) {
