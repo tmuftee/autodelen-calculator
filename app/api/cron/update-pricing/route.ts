@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
   const now = new Date().toISOString();
   const summary: Record<string, unknown> = { checkedAt: now };
   const canPersist = isPersistenceConfigured();
+  let hasChanges = false;
 
   try {
     const cambioScrape = await scrapeCambio();
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
     };
 
     if (canPersist) {
-      let cambioUpdated = false;
+      let cambioChanged = false;
       for (const scraped of cambioScrape.packages) {
         if (!scraped.complete || !scraped.packageId) continue;
         const pkg = current.cambio.packages.find((p) => p.id === scraped.packageId);
@@ -63,12 +64,12 @@ export async function GET(req: NextRequest) {
             { uptoKm: null, pricePerKm: sr.kmOver100! },
           ];
         }
-        cambioUpdated = true;
+        cambioChanged = true;
       }
-      if (cambioUpdated) {
+      if (cambioChanged) {
         current.cambio.asOf = now.slice(0, 10);
         current.cambio.needsReview = cambioScrape.packages.some((p) => !p.complete);
-        summary.cambioUpdated = true;
+        hasChanges = true;
       }
     }
   } catch (err) {
@@ -101,15 +102,28 @@ export async function GET(req: NextRequest) {
               : c
         ),
       };
-      summary.degageUpdated = true;
+      hasChanges = true;
     }
   } catch (err) {
     summary.degageError = err instanceof Error ? err.message : String(err);
   }
 
   current.lastAutoCheck = now;
+  // Report what actually landed in storage, not just what was staged
+  // locally - the write itself can fail (bad credentials, quota, network)
+  // even when persistence is "configured" and the scrape succeeded.
   if (canPersist) {
-    await savePricing(current);
+    const saveResult = await savePricing(current);
+    summary.saved = saveResult.saved;
+    if (!saveResult.saved) {
+      summary.saveError = saveResult.error;
+    } else if (hasChanges) {
+      summary.cambioUpdated = current.cambio.asOf === now.slice(0, 10);
+      summary.degageUpdated = current.degage.asOf === now.slice(0, 10);
+    }
+  } else {
+    summary.saved = false;
+    summary.saveError = "Persistence not configured";
   }
 
   return NextResponse.json(summary);

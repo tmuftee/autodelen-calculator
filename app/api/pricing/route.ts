@@ -34,5 +34,8 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await savePricing(body);
+  if (!result.saved) {
+    return NextResponse.json({ saved: false, error: result.error ?? "Failed to save pricing." }, { status: 502 });
+  }
   return NextResponse.json(result);
 }

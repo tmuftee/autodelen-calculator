@@ -47,20 +47,29 @@ async function kvGet(): Promise<PricingData | null> {
   }
 }
 
-async function kvSet(data: PricingData): Promise<void> {
+async function kvSet(data: PricingData): Promise<{ ok: boolean; error?: string }> {
   const url = restUrl();
   const token = restToken();
-  if (!url || !token) return;
+  if (!url || !token) return { ok: false, error: "Persistence not configured" };
 
-  await fetch(`${url}/set/${STORE_KEY}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(JSON.stringify(data)),
-    cache: "no-store",
-  });
+  try {
+    const res = await fetch(`${url}/set/${STORE_KEY}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(JSON.stringify(data)),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, error: `KV write failed: HTTP ${res.status} ${body}`.trim() };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `KV write failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 export async function getPricing(): Promise<{ data: PricingData; persisted: boolean }> {
@@ -71,8 +80,8 @@ export async function getPricing(): Promise<{ data: PricingData; persisted: bool
   return { data: SEED_PRICING, persisted: false };
 }
 
-export async function savePricing(data: PricingData): Promise<{ saved: boolean }> {
-  if (!isPersistenceConfigured()) return { saved: false };
-  await kvSet(data);
-  return { saved: true };
+export async function savePricing(data: PricingData): Promise<{ saved: boolean; error?: string }> {
+  if (!isPersistenceConfigured()) return { saved: false, error: "Persistence not configured" };
+  const result = await kvSet(data);
+  return { saved: result.ok, error: result.error };
 }
