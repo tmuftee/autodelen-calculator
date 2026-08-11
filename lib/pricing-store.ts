@@ -24,27 +24,54 @@ export function isPersistenceConfigured(): boolean {
   return Boolean(restUrl() && restToken());
 }
 
-async function kvGet(): Promise<PricingData | null> {
+interface RawRead {
+  found: boolean;
+  parsed: unknown;
+  debugType: string;
+  debugSample: string;
+}
+
+/**
+ * Fetches the raw stored value and JSON.parses it up to twice - REST KV
+ * APIs vary on whether a POSTed JSON body is stored as-is or re-encoded,
+ * so this tolerates either a singly- or doubly-encoded value rather than
+ * assuming one specific wire format.
+ */
+async function kvGetRaw(): Promise<RawRead> {
   const url = restUrl();
   const token = restToken();
-  if (!url || !token) return null;
+  if (!url || !token) return { found: false, parsed: undefined, debugType: "unconfigured", debugSample: "" };
 
   const res = await fetch(`${url}/get/${STORE_KEY}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { result: string | null };
-  if (!body.result) return null;
-  try {
-    const parsed: unknown = JSON.parse(body.result);
-    // Stored data may predate a schema change (e.g. saved by an older
-    // deploy) - never trust it blindly, fall back to the seed instead of
-    // crashing the app on a missing field.
-    return isValidPricingData(parsed) ? parsed : null;
-  } catch {
-    return null;
+  if (!res.ok) return { found: false, parsed: undefined, debugType: `http-${res.status}`, debugSample: "" };
+
+  const body = (await res.json()) as { result: unknown };
+  if (body.result === null || body.result === undefined) {
+    return { found: false, parsed: undefined, debugType: "null", debugSample: "" };
   }
+
+  let value: unknown = body.result;
+  for (let i = 0; i < 2 && typeof value === "string"; i++) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
+  }
+
+  const debugSample = JSON.stringify(value).slice(0, 300);
+  return { found: true, parsed: value, debugType: typeof value, debugSample };
+}
+
+async function kvGet(): Promise<PricingData | null> {
+  const { parsed } = await kvGetRaw();
+  // Stored data may predate a schema change (e.g. saved by an older
+  // deploy) - never trust it blindly, fall back to the seed instead of
+  // crashing the app on a missing field.
+  return isValidPricingData(parsed) ? parsed : null;
 }
 
 async function kvSet(data: PricingData): Promise<{ ok: boolean; error?: string }> {
@@ -59,13 +86,25 @@ async function kvSet(data: PricingData): Promise<{ ok: boolean; error?: string }
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(JSON.stringify(data)),
+      body: JSON.stringify(data),
       cache: "no-store",
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       return { ok: false, error: `KV write failed: HTTP ${res.status} ${body}`.trim() };
     }
+
+    // Verify the round-trip actually reads back as valid data instead of
+    // trusting a 200 from the write alone - a REST wire-format mismatch
+    // would otherwise report success while storing something unreadable.
+    const readBack = await kvGetRaw();
+    if (!isValidPricingData(readBack.parsed)) {
+      return {
+        ok: false,
+        error: `KV write returned OK but read-back didn't validate (parsed as ${readBack.debugType}: ${readBack.debugSample})`,
+      };
+    }
+
     return { ok: true };
   } catch (err) {
     return { ok: false, error: `KV write failed: ${err instanceof Error ? err.message : String(err)}` };
