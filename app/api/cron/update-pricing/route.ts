@@ -109,6 +109,14 @@ export async function GET(req: NextRequest) {
   }
 
   current.lastAutoCheck = now;
+  // Only bump lastUpdated when something actually changed, matching its
+  // meaning elsewhere (last time the pricing *data* changed, not just the
+  // last time a check happened) - but it must be set before saving so the
+  // persisted record and the summary agree.
+  if (hasChanges) {
+    current.lastUpdated = now;
+  }
+
   // Report what actually landed in storage, not just what was staged
   // locally - the write itself can fail (bad credentials, quota, network)
   // even when persistence is "configured" and the scrape succeeded.
@@ -120,6 +128,7 @@ export async function GET(req: NextRequest) {
     } else if (hasChanges) {
       summary.cambioUpdated = current.cambio.asOf === now.slice(0, 10);
       summary.degageUpdated = current.degage.asOf === now.slice(0, 10);
+      summary.lastUpdated = current.lastUpdated;
     }
   } else {
     summary.saved = false;
