@@ -80,8 +80,38 @@ export default function AdminClient() {
     setMessage(null);
     try {
       const res = await fetch("/api/pricing/update", { method: "POST" });
-      const body = await res.json();
+      const body = (await res.json()) as { cambio: CambioScrape; degage: DegageScrape };
       setScrape(body);
+
+      if (!pricing) return;
+      let next = editing ?? structuredCloneCompat(pricing);
+      const applied: string[] = [];
+
+      if (!body.cambio.error) {
+        for (const pkg of body.cambio.packages) {
+          if (pkg.complete && pkg.packageId) {
+            next = withCambioPackageApplied(next, pkg);
+            applied.push(pkg.name);
+          }
+        }
+      }
+
+      if (!body.degage.error) {
+        (["A", "B"] as const).forEach((cat) => {
+          const catScrape = cat === "A" ? body.degage.categoryA : body.degage.categoryB;
+          if (catScrape.brackets.every((b) => b !== null)) {
+            next = withDegageBracketsApplied(next, cat, catScrape.brackets);
+            applied.push(`Dégage ${cat}`);
+          }
+        });
+      }
+
+      setEditing(next);
+      setMessage(
+        applied.length > 0
+          ? `Auto-applied: ${applied.join(", ")}. Review the values below and Save.`
+          : "Fetched, but nothing came back complete enough to auto-apply — review and edit manually below."
+      );
     } catch {
       setMessage("Failed to fetch live pricing pages.");
     } finally {
@@ -203,50 +233,12 @@ export default function AdminClient() {
 
   function applyDegageBrackets(categoryId: "A" | "B", brackets: (KmBracket | null)[]) {
     if (!editing) return;
-    if (brackets.some((b) => b === null)) return;
-    setEditing({
-      ...editing,
-      degage: {
-        ...editing.degage,
-        categories: editing.degage.categories.map((c) =>
-          c.categoryId === categoryId ? { ...c, kmBrackets: brackets as KmBracket[] } : c
-        ),
-      },
-    });
+    setEditing(withDegageBracketsApplied(editing, categoryId, brackets));
   }
 
   function applyCambioPackage(scraped: ScrapedCambioPackage) {
-    if (!editing || !scraped.complete || !scraped.packageId) return;
-    setEditing({
-      ...editing,
-      cambio: {
-        ...editing.cambio,
-        packages: editing.cambio.packages.map((p) =>
-          p.id === scraped.packageId
-            ? {
-                ...p,
-                monthlyFee: scraped.monthlyFee!,
-                activationFee: scraped.activationFee!,
-                rates: p.rates.map((r) => {
-                  const sr = scraped.rates.find((x) => x.categoryId === r.categoryId);
-                  if (!sr) return r;
-                  return {
-                    ...r,
-                    dayHourlyRate: sr.dayHourlyRate!,
-                    nightHourlyRate: sr.nightHourlyRate!,
-                    dayRate: sr.dayRate!,
-                    weeklyRate: sr.weeklyRate!,
-                    kmBrackets: [
-                      { uptoKm: 100, pricePerKm: sr.kmUnder100! },
-                      { uptoKm: null, pricePerKm: sr.kmOver100! },
-                    ],
-                  };
-                }),
-              }
-            : p
-        ),
-      },
-    });
+    if (!editing) return;
+    setEditing(withCambioPackageApplied(editing, scraped));
   }
 
   if (!draft) return <p className="text-sm text-neutral-400">Loading…</p>;
@@ -281,9 +273,10 @@ export default function AdminClient() {
           </button>
         </div>
         <p className="text-xs text-neutral-500">
-          Pulls the live pages and parses their pricing tables directly. A package/category marked
-          &quot;complete&quot; had every field found and can be applied with one click — anything incomplete (or if the
-          site&apos;s markup changes) still needs a manual check against the source link.
+          Pulls the live pages and parses their pricing tables directly. Anything that comes back
+          &quot;complete&quot; (every field found) is applied to the form below automatically — review it and click
+          Save when you&apos;re happy. Anything incomplete (or if the site&apos;s markup changes) is left alone for a
+          manual check against the source link instead.
         </p>
 
         {scrape && (
@@ -562,6 +555,57 @@ export default function AdminClient() {
 
 function structuredCloneCompat<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+function withCambioPackageApplied(base: PricingData, scraped: ScrapedCambioPackage): PricingData {
+  if (!scraped.complete || !scraped.packageId) return base;
+  return {
+    ...base,
+    cambio: {
+      ...base.cambio,
+      packages: base.cambio.packages.map((p) =>
+        p.id === scraped.packageId
+          ? {
+              ...p,
+              monthlyFee: scraped.monthlyFee!,
+              activationFee: scraped.activationFee!,
+              rates: p.rates.map((r) => {
+                const sr = scraped.rates.find((x) => x.categoryId === r.categoryId);
+                if (!sr) return r;
+                return {
+                  ...r,
+                  dayHourlyRate: sr.dayHourlyRate!,
+                  nightHourlyRate: sr.nightHourlyRate!,
+                  dayRate: sr.dayRate!,
+                  weeklyRate: sr.weeklyRate!,
+                  kmBrackets: [
+                    { uptoKm: 100, pricePerKm: sr.kmUnder100! },
+                    { uptoKm: null, pricePerKm: sr.kmOver100! },
+                  ],
+                };
+              }),
+            }
+          : p
+      ),
+    },
+  };
+}
+
+function withDegageBracketsApplied(
+  base: PricingData,
+  categoryId: "A" | "B",
+  brackets: (KmBracket | null)[]
+): PricingData {
+  if (brackets.some((b) => b === null)) return base;
+  return {
+    ...base,
+    degage: {
+      ...base.degage,
+      categories: base.degage.categories.map((c) =>
+        c.categoryId === categoryId ? { ...c, kmBrackets: brackets as KmBracket[] } : c
+      ),
+    },
+  };
 }
 
 function ScrapePanel({
